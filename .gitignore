@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# Env & secrets
+.env
+.env.*
+*.db
+*.sqlite3
+
+# Logs
+*.log
+server*.log
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+frontend/.claude/
+
+# Debug / probe scripts and output artifacts
+backend/probe_*.py
+backend/probe_*.txt
+backend/probe_*.json
+backend/*_out.txt
+backend/lola_main.txt
+backend/last_test.txt
+backend/build_rsc_out.txt
