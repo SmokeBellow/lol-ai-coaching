@@ -388,6 +388,11 @@ class ResolveBody(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.get("/analyze")
 async def analyze_endpoint(
     summoner: str = Query(..., description="Riot ID (Name#TAG) или ник"),
