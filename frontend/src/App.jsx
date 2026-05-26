@@ -8,6 +8,10 @@
 
 import React, { useState, useCallback } from 'react'
 
+// В продакшене (GitHub Pages) VITE_API_URL = Railway URL бэкенда.
+// В разработке (localhost) — пустая строка, запросы идут через Vite proxy.
+const API = import.meta.env.VITE_API_URL || ''
+
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
@@ -459,7 +463,7 @@ export default function App() {
     setLoading(true); setError(null); setData(null)
     const params = new URLSearchParams({ summoner, region, role, count })
     try {
-      const res = await fetch(`/analyze?${params}`)
+      const res = await fetch(`${API}/analyze?${params}`)
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || `HTTP ${res.status}`) }
       setData(await res.json())
     } catch (e) { setError(e.message) }
@@ -468,7 +472,7 @@ export default function App() {
 
   const handleResolve = useCallback(async (mistakeId) => {
     try {
-      const res = await fetch('/mistakes/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mistake_id: mistakeId }) })
+      const res = await fetch(`${API}/mistakes/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mistake_id: mistakeId }) })
       if (!res.ok) throw new Error('Не удалось закрыть ошибку')
       setData(prev => prev ? { ...prev, active_mistakes: (prev.active_mistakes || []).filter(m => m.id !== mistakeId) } : prev)
     } catch (e) { setError(e.message) }

@@ -82,9 +82,15 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="LoL AI Coaching API", version="0.2.0", lifespan=lifespan)
 
+_cors_extra = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://smokebellow.github.io",
+        *_cors_extra,
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
