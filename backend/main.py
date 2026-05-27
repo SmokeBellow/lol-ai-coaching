@@ -348,14 +348,25 @@ async def _analyze_single_role(
     if cached_result is not None:
         cached_result["from_cache"] = True
         cached_result["new_achievements"] = []
+        cached_result["new_quest_ids"] = []
         # Always serve fresh gamification state even on cache hit
         try:
-            from gamification import _get_quests_for_display, _get_earned_achievements
+            from gamification import (
+                _get_quests_for_display, _get_earned_achievements,
+                _count_completed_quests, compute_level, XP_PER_QUEST,
+            )
             cached_result["quests"]       = _get_quests_for_display(state.db, puuid, cache_role)
             cached_result["achievements"] = _get_earned_achievements(state.db, puuid)
+            cached_result["level"]        = compute_level(
+                _count_completed_quests(state.db, puuid) * XP_PER_QUEST
+            )
         except Exception:
             cached_result.setdefault("quests", [])
             cached_result.setdefault("achievements", [])
+            cached_result.setdefault("level", {
+                "level": 1, "total_xp": 0, "xp_in_level": 0,
+                "xp_for_next_level": 100, "progress_pct": 0.0,
+            })
         return cached_result
 
     # 3. Ранг
@@ -515,7 +526,11 @@ async def _analyze_single_role(
     except Exception as _gami_exc:
         import logging as _log
         _log.exception("Gamification failed for %s/%s: %s", puuid[:12], role, _gami_exc)
-        gamification = {"quests": [], "achievements": [], "new_achievements": []}
+        gamification = {
+            "quests": [], "achievements": [], "new_achievements": [],
+            "new_quest_ids": [],
+            "level": {"level": 1, "total_xp": 0, "xp_in_level": 0, "xp_for_next_level": 100, "progress_pct": 0.0},
+        }
 
     # 13. Ответ
     fresh_mistakes = get_active_mistakes(state.db, puuid, role.upper())
@@ -529,6 +544,10 @@ async def _analyze_single_role(
     response["quests"]               = gamification["quests"]
     response["achievements"]         = gamification["achievements"]
     response["new_achievements"]     = gamification["new_achievements"]
+    response["new_quest_ids"]        = gamification.get("new_quest_ids", [])
+    response["level"]                = gamification.get("level", {
+        "level": 1, "total_xp": 0, "xp_in_level": 0, "xp_for_next_level": 100, "progress_pct": 0.0,
+    })
 
     if coaching.get("confidence", 0) > 0:
         save_analysis_cache(state.db, puuid, cache_role, newest_match, response)

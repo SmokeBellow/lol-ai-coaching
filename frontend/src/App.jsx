@@ -3,13 +3,11 @@
  *
  * Режимы:
  *  ALL   → RoleComparePanel (игры по ролям, лучшая роль)
- *  Роль  → полный анализ + FlagsBar + SummaryCard + Claude coaching + follow_up + MistakeTracker
+ *  Роль  → полный анализ + 3 вкладки: Советы тренера / Чемпионы / Прогрессия
  */
 
 import React, { useState, useCallback } from 'react'
 
-// В продакшене (GitHub Pages) VITE_API_URL = Railway URL бэкенда.
-// В разработке (localhost) — пустая строка, запросы идут через Vite proxy.
 const API = import.meta.env.VITE_API_URL || ''
 
 // ---------------------------------------------------------------------------
@@ -22,21 +20,21 @@ const C = {
   success: '#22c55e', warn: '#f59e0b', danger: '#ef4444', purple: '#a855f7',
   gold: '#f59e0b',
 }
-const ROW = { display: 'flex', gap: 8, alignItems: 'center' }
-const COL = { display: 'flex', flexDirection: 'column', gap: 8 }
+const ROW  = { display: 'flex', gap: 8, alignItems: 'center' }
+const COL  = { display: 'flex', flexDirection: 'column', gap: 8 }
 const CARD = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px 20px' }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-const quartileColor  = q => ({ top: C.success, above: '#84cc16', below: C.warn, bottom: C.danger }[q] ?? C.text)
-const quartileLabel  = q => ({ top: 'ТОП 25%', above: 'ВЫШЕ МЕД', below: 'НИЖЕ МЕД', bottom: 'БОТ 25%' }[q] ?? (q||'').toUpperCase())
-const trendIcon      = d => ({ improving: '↑', declining: '↓', stable: '→', insufficient_data: '?' }[d] ?? '?')
-const trendColor     = d => ({ improving: C.success, declining: C.danger, stable: C.textDim, insufficient_data: C.textDim }[d] ?? C.text)
-const severityColor  = s => ({ minor: C.warn, moderate: '#f97316', major: C.danger, escalated: C.purple }[s] ?? C.text)
-const fmtNum         = (n, d = 2) => n != null ? Number(n).toFixed(d) : '—'
-const ROLE_RU        = { TOP: 'Топ', JUNGLE: 'Джунгли', MIDDLE: 'Мид', BOTTOM: 'Бот', UTILITY: 'Сапорт', ALL: 'Все роли' }
-const TIER_COLOR     = { IRON: '#8b8b8b', BRONZE: '#cd7f32', SILVER: '#a8a9ad', GOLD: C.gold, PLATINUM: '#0ac8b9', EMERALD: '#30c462', DIAMOND: '#5966b0', MASTER: '#9d48e0', GRANDMASTER: '#e84057', CHALLENGER: '#f4c874' }
+const quartileColor = q => ({ top: C.success, above: '#84cc16', below: C.warn, bottom: C.danger }[q] ?? C.text)
+const quartileLabel = q => ({ top: 'ТОП 25%', above: 'ВЫШЕ МЕД', below: 'НИЖЕ МЕД', bottom: 'БОТ 25%' }[q] ?? (q||'').toUpperCase())
+const trendIcon     = d => ({ improving: '↑', declining: '↓', stable: '→', insufficient_data: '?' }[d] ?? '?')
+const trendColor    = d => ({ improving: C.success, declining: C.danger, stable: C.textDim, insufficient_data: C.textDim }[d] ?? C.text)
+const severityColor = s => ({ minor: C.warn, moderate: '#f97316', major: C.danger, escalated: C.purple }[s] ?? C.text)
+const fmtNum        = (n, d = 2) => n != null ? Number(n).toFixed(d) : '—'
+const ROLE_RU       = { TOP: 'Топ', JUNGLE: 'Джунгли', MIDDLE: 'Мид', BOTTOM: 'Бот', UTILITY: 'Сапорт', ALL: 'Все роли' }
+const TIER_COLOR    = { IRON: '#8b8b8b', BRONZE: '#cd7f32', SILVER: '#a8a9ad', GOLD: C.gold, PLATINUM: '#0ac8b9', EMERALD: '#30c462', DIAMOND: '#5966b0', MASTER: '#9d48e0', GRANDMASTER: '#e84057', CHALLENGER: '#f4c874' }
 
 function Pill({ label, color }) {
   return (
@@ -100,7 +98,6 @@ function InputForm({ onSubmit, loading }) {
 // ---------------------------------------------------------------------------
 // 2. ALL-ROLES: Role Compare Panel
 // ---------------------------------------------------------------------------
-
 function RoleBar({ value, max, color }) {
   const pct = max > 0 ? Math.round(value / max * 100) : 0
   return (
@@ -118,7 +115,6 @@ function RoleComparePanel({ data }) {
 
   return (
     <div style={COL}>
-      {/* Header */}
       <div style={{ ...CARD, ...ROW, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <h2 style={{ fontSize: 20, color: '#fff', marginBottom: 2 }}>{summoner}</h2>
@@ -130,7 +126,6 @@ function RoleComparePanel({ data }) {
         </div>
       </div>
 
-      {/* Role cards */}
       {roles.map(([role, s]) => {
         const isBest = role === best_role
         return (
@@ -147,22 +142,14 @@ function RoleComparePanel({ data }) {
                 <Pill label={`${s.winrate}% WR`} color={s.winrate >= 55 ? C.success : s.winrate >= 45 ? C.warn : C.danger} />
               </div>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px 20px' }}>
-              {[
-                ['CS/min',     s.cs_per_min,      ''],
-                ['Vision/min', s.vision_per_min,  ''],
-                ['Deaths',     s.deaths_per_game,  ''],
-                ['KP',         s.kill_participation, '%'],
-              ].map(([label, val, unit]) => (
+              {[['CS/min', s.cs_per_min, ''], ['Vision/min', s.vision_per_min, ''], ['Deaths', s.deaths_per_game, ''], ['KP', s.kill_participation, '%']].map(([label, val, unit]) => (
                 <div key={label} style={{ ...ROW, gap: 6, fontSize: 13 }}>
                   <span style={{ color: C.textDim, minWidth: 80 }}>{label}</span>
                   <span style={{ fontWeight: 700, color: C.text }}>{fmtNum(val)}{unit}</span>
                 </div>
               ))}
             </div>
-
-            {/* Games bar */}
             <div style={{ ...ROW, marginTop: 10, gap: 8 }}>
               <span style={{ fontSize: 11, color: C.textDim, minWidth: 56 }}>{s.games} игр</span>
               <RoleBar value={s.games} max={maxGames} color={isBest ? C.success : C.accent} />
@@ -185,11 +172,11 @@ function RoleComparePanel({ data }) {
 // ---------------------------------------------------------------------------
 function FlagsBar({ coaching, rankDirection, patchChanged, fromCache }) {
   const flagMap = {
-    rank_up:           { label: '🏆 Ранг ВЫРОС',        color: C.success },
-    rank_down:         { label: '↘ Ранг УПАЛ',          color: C.danger  },
-    patch_changed:     { label: '⚡ Смена патча',       color: C.warn    },
-    stale_data:        { label: '⏰ Устаревшие данные',  color: C.textDim },
-    static_benchmark:  { label: '📊 Статичный бенчмарк', color: C.textDim },
+    rank_up:          { label: '🏆 Ранг ВЫРОС',        color: C.success },
+    rank_down:        { label: '↘ Ранг УПАЛ',          color: C.danger  },
+    patch_changed:    { label: '⚡ Смена патча',        color: C.warn    },
+    stale_data:       { label: '⏰ Устаревшие данные',  color: C.textDim },
+    static_benchmark: { label: '📊 Статичный бенчмарк', color: C.textDim },
   }
   const flags = [...(coaching?.flags || [])]
   if (rankDirection === 'up')   flags.push('rank_up')
@@ -233,19 +220,19 @@ function SummaryCard({ summary, benchmark_deltas, trends }) {
   return (
     <div style={CARD}>
       <SectionTitle>Статистика — Rolling 10 игр</SectionTitle>
-      <MetricRow label="CS / мин"          value={summary?.cs_per_min}          delta={benchmark_deltas?.cs_per_min}         trend={trends?.cs_per_min} />
-      <MetricRow label="Vision / мин"      value={summary?.vision_per_min}      delta={benchmark_deltas?.vision_per_min}     trend={trends?.vision_per_min} />
-      <MetricRow label="Смертей / игру"    value={summary?.deaths_per_game}     delta={benchmark_deltas?.deaths}             trend={trends?.deaths} />
-      <MetricRow label="Kill Participation" value={summary?.kill_participation} delta={benchmark_deltas?.kill_participation} trend={trends?.kill_participation} unit="%" />
-      <MetricRow label="Доля урона"        value={summary?.damage_share}        unit="%" />
-      <MetricRow label="Winrate"           value={summary?.winrate}             unit="%" />
+      <MetricRow label="CS / мин"               value={summary?.cs_per_min}          delta={benchmark_deltas?.cs_per_min}         trend={trends?.cs_per_min} />
+      <MetricRow label="Vision / мин"           value={summary?.vision_per_min}      delta={benchmark_deltas?.vision_per_min}     trend={trends?.vision_per_min} />
+      <MetricRow label="Смертей / игру"         value={summary?.deaths_per_game}     delta={benchmark_deltas?.deaths}             trend={trends?.deaths} />
+      <MetricRow label="Kill Participation"     value={summary?.kill_participation}  delta={benchmark_deltas?.kill_participation} trend={trends?.kill_participation} unit="%" />
+      <MetricRow label="Доля урона"             value={summary?.damage_share}        unit="%" />
+      <MetricRow label="Winrate"                value={summary?.winrate}             unit="%" />
       <MetricRow label="Сольных смертей до 10м" value={summary?.solo_deaths_early_avg} />
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 5. Follow-up (прогресс по прошлому совету)
+// 5. Follow-up
 // ---------------------------------------------------------------------------
 function FollowUp({ text, newGames }) {
   if (!text || !newGames) return null
@@ -355,7 +342,7 @@ function WinrateBar({ winrate }) {
 
 function ChampionStatsPanel({ champion_stats }) {
   if (!champion_stats?.length) return null
-  const top = champion_stats.slice(0, 6)   // показываем не более 6 чемпионов
+  const top = champion_stats.slice(0, 6)
 
   return (
     <div style={CARD}>
@@ -380,12 +367,8 @@ function ChampionStatsPanel({ champion_stats }) {
                       <span style={{ fontWeight: 700, color: '#fff' }}>{c.champion}</span>
                     </div>
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'center', color: C.textDim }}>
-                    {c.games}
-                  </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                    <WinrateBar winrate={c.winrate} />
-                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center', color: C.textDim }}>{c.games}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center' }}><WinrateBar winrate={c.winrate} /></td>
                   <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: kdaColor }}>
                     {fmtNum(c.kda)}
                     <span style={{ display: 'block', fontSize: 10, color: C.textDim, fontWeight: 400 }}>
@@ -405,7 +388,68 @@ function ChampionStatsPanel({ champion_stats }) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Quest Panel
+// 9. Quest Highlight — новое задание с золотым свечением
+// ---------------------------------------------------------------------------
+function QuestHighlight({ quest }) {
+  const done  = quest.games_done  ?? 0
+  const total = quest.target_games ?? 1
+  const pct   = total > 0 ? Math.min(done / total * 100, 100) : 0
+
+  return (
+    <div style={{
+      background:    `linear-gradient(135deg, ${C.gold}15, ${C.surface})`,
+      border:        `1.5px solid ${C.gold}`,
+      borderRadius:  12,
+      padding:       '16px 18px',
+      boxShadow:     `0 0 20px ${C.gold}30`,
+      marginBottom:  4,
+    }}>
+      {/* Callout row */}
+      <div style={{ ...ROW, gap: 10, marginBottom: 12 }}>
+        <span style={{
+          fontSize: 11, fontWeight: 900, letterSpacing: '0.1em',
+          color: C.gold, background: C.gold+'22',
+          border: `1px solid ${C.gold}`, borderRadius: 6, padding: '2px 8px',
+        }}>
+          ✨ НОВОЕ ЗАДАНИЕ
+        </span>
+        <span style={{ fontSize: 11, color: C.textDim, fontWeight: 600 }}>+100 XP за выполнение</span>
+      </div>
+
+      {/* Quest body */}
+      <div style={{ ...ROW, justifyContent: 'space-between', marginBottom: 10, gap: 12 }}>
+        <div style={{ ...ROW, gap: 12 }}>
+          <span style={{ fontSize: 26 }}>{quest.icon || '🎯'}</span>
+          <div>
+            <div style={{ fontWeight: 800, color: '#fff', fontSize: 15, marginBottom: 3 }}>{quest.title}</div>
+            <div style={{ color: C.textDim, fontSize: 12, lineHeight: 1.4 }}>{quest.description}</div>
+          </div>
+        </div>
+        <span style={{ color: C.gold, fontWeight: 900, fontSize: 18, letterSpacing: '0.03em', flexShrink: 0 }}>
+          {done}/{total}
+        </span>
+      </div>
+
+      {/* Gold progress bar */}
+      <div style={{ background: C.border, borderRadius: 5, height: 8, overflow: 'hidden' }}>
+        <div style={{
+          width:      `${pct}%`,
+          height:     '100%',
+          background: `linear-gradient(90deg, ${C.gold}, #fbbf24)`,
+          borderRadius: 5,
+          transition: 'width 0.5s ease',
+        }} />
+      </div>
+      <div style={{ ...ROW, justifyContent: 'space-between', marginTop: 6 }}>
+        <span style={{ fontSize: 11, color: C.textDim }}>{done} из {total} игр выполнено</span>
+        <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>{Math.round(pct)}%</span>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 10. Quest Card — обычный (не новый) квест
 // ---------------------------------------------------------------------------
 function QuestProgressBar({ done, total, completed }) {
   const pct   = total > 0 ? Math.min(done / total * 100, 100) : 0
@@ -418,7 +462,7 @@ function QuestProgressBar({ done, total, completed }) {
 }
 
 function QuestCard({ quest }) {
-  const done      = quest.games_done ?? 0
+  const done      = quest.games_done  ?? 0
   const total     = quest.target_games ?? 1
   const completed = quest.status === 'completed'
   const color     = completed ? C.success : C.accent
@@ -445,36 +489,47 @@ function QuestCard({ quest }) {
   )
 }
 
-function QuestPanel({ quests }) {
-  if (!quests?.length) return null
+function QuestPanel({ quests, newQuestIds = [] }) {
+  if (!quests?.length) return (
+    <div style={CARD}>
+      <SectionTitle>🎯 Задание</SectionTitle>
+      <div style={{ color: C.textDim, fontSize: 13 }}>Заданий пока нет — запусти анализ снова!</div>
+    </div>
+  )
+
+  const newIdSet  = new Set(newQuestIds)
   const active    = quests.filter(q => q.status === 'active')
   const completed = quests.filter(q => q.status === 'completed')
+  const newActive = active.filter(q => newIdSet.has(q.id))
+  const oldActive = active.filter(q => !newIdSet.has(q.id))
+
   return (
     <div style={CARD}>
-      <SectionTitle>🎯 Задания</SectionTitle>
-      {active.map(q => <QuestCard key={q.id} quest={q} />)}
+      <SectionTitle>🎯 Задание</SectionTitle>
+      {/* New quests rendered with highlight */}
+      {newActive.map(q => <QuestHighlight key={q.id} quest={q} />)}
+      {/* Existing active quests */}
+      {oldActive.map(q => <QuestCard key={q.id} quest={q} />)}
+      {/* Recently completed */}
       {completed.map(q => <QuestCard key={q.id} quest={q} />)}
-      {active.length === 0 && completed.length === 0 && (
-        <div style={{ color: C.textDim, fontSize: 13 }}>Заданий пока нет — запусти анализ снова!</div>
-      )}
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 10. Achievements Panel
+// 11. Achievements Panel
 // ---------------------------------------------------------------------------
 function AchievementBadge({ ach, isNew }) {
   return (
     <div style={{
-      background: isNew ? C.gold + '22' : C.border + '55',
-      border:     `1px solid ${isNew ? C.gold : C.border}`,
+      background:   isNew ? C.gold + '22' : C.border + '55',
+      border:       `1px solid ${isNew ? C.gold : C.border}`,
       borderRadius: 10,
-      padding: '10px 14px',
-      display: 'flex', gap: 10, alignItems: 'center',
-      minWidth: 150,
-      flex: '1 1 150px',
-      position: 'relative',
+      padding:      '10px 14px',
+      display:      'flex', gap: 10, alignItems: 'center',
+      minWidth:     150,
+      flex:         '1 1 150px',
+      position:     'relative',
     }}>
       {isNew && (
         <div style={{ position: 'absolute', top: -6, right: -6, background: C.gold, borderRadius: '50%', width: 14, height: 14, fontSize: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 900 }}>
@@ -491,11 +546,16 @@ function AchievementBadge({ ach, isNew }) {
 }
 
 function AchievementsPanel({ achievements, newAchievements }) {
-  if (!achievements?.length) return null
+  if (!achievements?.length) return (
+    <div style={CARD}>
+      <SectionTitle>🏅 Достижения</SectionTitle>
+      <div style={{ color: C.textDim, fontSize: 13 }}>Выполни задания, чтобы заработать достижения!</div>
+    </div>
+  )
   const newKeys = new Set((newAchievements || []).map(a => a.key))
   return (
     <div style={CARD}>
-      <SectionTitle>🏆 Достижения ({achievements.length})</SectionTitle>
+      <SectionTitle>🏅 Достижения ({achievements.length})</SectionTitle>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {achievements.map(a => (
           <AchievementBadge key={a.key} ach={a} isNew={newKeys.has(a.key)} />
@@ -526,7 +586,101 @@ function NewAchievementBanner({ achievements }) {
 }
 
 // ---------------------------------------------------------------------------
-// 12. Benchmark Panel
+// 12. Level Panel
+// ---------------------------------------------------------------------------
+function LevelPanel({ level }) {
+  if (!level) return null
+  const { level: lvl, xp_in_level, xp_for_next_level, progress_pct, total_xp } = level
+
+  // Conic gradient: CSS custom property trick via inline style + div
+  const ringDeg   = Math.round((progress_pct / 100) * 360)
+  const ringColor = C.accent
+
+  return (
+    <div style={{ ...CARD, ...ROW, gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+      {/* Circular level badge */}
+      <div style={{ position: 'relative', width: 88, height: 88, flexShrink: 0 }}>
+        {/* Outer ring via conic-gradient */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          borderRadius: '50%',
+          background: `conic-gradient(${ringColor} ${ringDeg}deg, ${C.border} ${ringDeg}deg)`,
+        }} />
+        {/* Inner circle */}
+        <div style={{
+          position: 'absolute', inset: 6,
+          borderRadius: '50%',
+          background: C.surface,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{lvl}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: C.textDim, marginTop: 1 }}>УР.</span>
+        </div>
+      </div>
+
+      {/* XP details */}
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ ...ROW, justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Уровень {lvl}</span>
+          <span style={{ fontSize: 12, color: C.textDim }}>{total_xp} XP всего</span>
+        </div>
+        <div style={{ background: C.border, borderRadius: 5, height: 10, overflow: 'hidden', marginBottom: 6 }}>
+          <div style={{
+            width:      `${progress_pct}%`,
+            height:     '100%',
+            background: `linear-gradient(90deg, ${C.accent}, ${C.purple})`,
+            borderRadius: 5,
+            transition: 'width 0.6s ease',
+          }} />
+        </div>
+        <div style={{ ...ROW, justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, color: C.textDim }}>{xp_in_level} / {xp_for_next_level} XP</span>
+          <span style={{ fontSize: 12, color: C.accent, fontWeight: 700 }}>→ Ур.&nbsp;{lvl + 1}</span>
+        </div>
+        <div style={{ fontSize: 11, color: C.textDim, marginTop: 6 }}>
+          Каждое выполненное задание приносит +100&nbsp;XP
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 13. Tab Bar
+// ---------------------------------------------------------------------------
+function TabBar({ tabs, active, onChange }) {
+  return (
+    <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: 4, gap: 0 }}>
+      {tabs.map(tab => {
+        const isActive = active === tab.id
+        return (
+          <button
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            style={{
+              background:   'none',
+              border:       'none',
+              borderBottom: isActive ? `2px solid ${C.accent}` : '2px solid transparent',
+              color:        isActive ? '#fff' : C.textDim,
+              padding:      '10px 18px',
+              fontSize:     13,
+              fontWeight:   isActive ? 700 : 500,
+              cursor:       'pointer',
+              marginBottom: -1,
+              transition:   'color 0.15s, border-color 0.15s',
+              letterSpacing: '0.01em',
+            }}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 14. Benchmark Panel
 // ---------------------------------------------------------------------------
 function BenchmarkPanel({ benchmark }) {
   if (!benchmark) return null
@@ -563,7 +717,7 @@ function BenchmarkPanel({ benchmark }) {
 }
 
 // ---------------------------------------------------------------------------
-// 13. Confidence Bar
+// 15. Confidence Bar
 // ---------------------------------------------------------------------------
 function ConfidenceBar({ confidence }) {
   if (confidence == null) return null
@@ -583,13 +737,21 @@ function ConfidenceBar({ confidence }) {
 }
 
 // ---------------------------------------------------------------------------
-// Result Panels
+// 16. Single Role Result — 3 вкладки
 // ---------------------------------------------------------------------------
+const TABS = [
+  { id: 'coaching',    label: '💬 Советы тренера' },
+  { id: 'champions',   label: '⚔️ Чемпионы'       },
+  { id: 'progression', label: '🏆 Прогрессия'      },
+]
+
 function SingleRoleResult({ data, onResolve }) {
+  const [activeTab, setActiveTab] = useState('coaching')
   const tierColor = TIER_COLOR[data.rank?.tier] ?? C.textDim
+
   return (
     <div style={{ ...COL, gap: 16 }}>
-      {/* Header */}
+      {/* ── Header ── */}
       <div style={{ ...ROW, justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h2 style={{ fontSize: 20, color: '#fff', marginBottom: 2 }}>{data.summoner}</h2>
@@ -597,7 +759,7 @@ function SingleRoleResult({ data, onResolve }) {
             {data.region?.toUpperCase()} · {ROLE_RU[data.role] || data.role} · {data.tier}
             {data.rank && <span style={{ color: tierColor, fontWeight: 600 }}> · {data.rank.tier} {data.rank.division} {data.rank.lp} LP</span>}
             {' '}· Патч {data.patch}
-            {' '}· {data.games_used}/{data.games_analyzed} игр на роли
+            {' '}· {data.games_used}/{data.games_analyzed} игр
             {data.games_searched > data.games_analyzed && <span style={{ color: C.textDim }}> (проверено {data.games_searched})</span>}
             {data.new_games_since_prev > 0 && <span style={{ color: C.success }}> · +{data.new_games_since_prev} новых</span>}
           </span>
@@ -612,11 +774,11 @@ function SingleRoleResult({ data, onResolve }) {
           <span style={{ fontSize: 18 }}>⚠️</span>
           <div>
             <div style={{ fontWeight: 700, color: C.warn, fontSize: 13, marginBottom: 2 }}>
-              Мало данных — найдено {data.role_games_found} из {10} нужных игр
+              Мало данных — найдено {data.role_games_found} из 10 нужных игр
               {data.games_searched > data.role_games_found && ` (проверено ${data.games_searched} матчей)`}
             </div>
             <div style={{ color: C.textDim, fontSize: 12 }}>
-              Тренды и бенчмарк-сравнение могут быть неточными. Сыграй больше игр на этой роли для полноценного анализа.
+              Тренды и бенчмарк-сравнение могут быть неточными. Сыграй больше игр на этой роли.
             </div>
           </div>
         </div>
@@ -626,23 +788,36 @@ function SingleRoleResult({ data, onResolve }) {
         <NewAchievementBanner achievements={data.new_achievements} />
       )}
 
-      <FollowUp text={data.coaching?.follow_up} newGames={data.new_games_since_prev} />
+      {/* ── Tabs ── */}
+      <TabBar tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
-      <PrimaryFocus text={data.coaching?.primary_focus} />
+      {/* ── Tab: Советы тренера ── */}
+      {activeTab === 'coaching' && (
+        <div style={{ ...COL, gap: 14 }}>
+          <FollowUp text={data.coaching?.follow_up} newGames={data.new_games_since_prev} />
+          <PrimaryFocus text={data.coaching?.primary_focus} />
+          <QuestPanel quests={data.quests} newQuestIds={data.new_quest_ids} />
+          <CoachingSection summary={data.coaching?.summary} coaching_points={data.coaching?.coaching_points} />
+          <MistakeTracker mistakes={data.active_mistakes} onResolve={onResolve} />
+        </div>
+      )}
 
-      <SummaryCard summary={data.summary} benchmark_deltas={data.benchmark_deltas} trends={data.trends} />
+      {/* ── Tab: Чемпионы ── */}
+      {activeTab === 'champions' && (
+        <div style={{ ...COL, gap: 14 }}>
+          <SummaryCard summary={data.summary} benchmark_deltas={data.benchmark_deltas} trends={data.trends} />
+          <ChampionStatsPanel champion_stats={data.champion_stats} />
+          <BenchmarkPanel benchmark={data.benchmark} />
+        </div>
+      )}
 
-      <QuestPanel quests={data.quests} />
-
-      <ChampionStatsPanel champion_stats={data.champion_stats} />
-
-      <CoachingSection summary={data.coaching?.summary} coaching_points={data.coaching?.coaching_points} />
-
-      <MistakeTracker mistakes={data.active_mistakes} onResolve={onResolve} />
-
-      <AchievementsPanel achievements={data.achievements} newAchievements={data.new_achievements} />
-
-      <BenchmarkPanel benchmark={data.benchmark} />
+      {/* ── Tab: Прогрессия ── */}
+      {activeTab === 'progression' && (
+        <div style={{ ...COL, gap: 14 }}>
+          <LevelPanel level={data.level} />
+          <AchievementsPanel achievements={data.achievements} newAchievements={data.new_achievements} />
+        </div>
+      )}
     </div>
   )
 }
@@ -706,7 +881,11 @@ export default function App() {
 
   const handleResolve = useCallback(async (mistakeId) => {
     try {
-      const res = await fetch(`${API}/mistakes/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mistake_id: mistakeId }) })
+      const res = await fetch(`${API}/mistakes/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mistake_id: mistakeId }),
+      })
       if (!res.ok) throw new Error('Не удалось закрыть ошибку')
       setData(prev => prev ? { ...prev, active_mistakes: (prev.active_mistakes || []).filter(m => m.id !== mistakeId) } : prev)
     } catch (e) { setError(e.message) }
@@ -724,9 +903,9 @@ export default function App() {
       {loading && <Spinner />}
       {error   && <ErrorBox message={error} />}
 
-      {data && data.mode === 'all_roles'    && <RoleComparePanel data={data} />}
-      {data && data.insufficient_data      && <InsufficientDataCard data={data} />}
-      {data && !data.mode && !data.insufficient_data && <SingleRoleResult data={data} onResolve={handleResolve} />}
+      {data && data.mode === 'all_roles'                   && <RoleComparePanel data={data} />}
+      {data && data.insufficient_data                      && <InsufficientDataCard data={data} />}
+      {data && !data.mode && !data.insufficient_data       && <SingleRoleResult data={data} onResolve={handleResolve} />}
     </div>
   )
 }

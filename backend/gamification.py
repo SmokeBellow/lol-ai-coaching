@@ -1,5 +1,5 @@
 """
-Gamification system: Quests and Achievements for LoL coaching.
+Gamification system: Quests, Achievements, and Level progression for LoL coaching.
 
 Quests
 ------
@@ -19,6 +19,7 @@ Achievements
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 from typing import Optional
@@ -60,12 +61,51 @@ _QUEST_DEFS: dict[str, dict] = {
 
 _QUARTILE_ORDER = {"bottom": 0, "below": 1, "above": 2, "top": 3}
 
+QUEST_TARGET_GAMES = 3   # всегда 3 игры на задание
+
 
 def _games_word(n: int) -> str:
     """Russian inflection: 1 → игру, 2-4 → игры, 5+ → игр."""
     if 11 <= n % 100 <= 19:
         return "игр"
     return {1: "игру", 2: "игры", 3: "игры", 4: "игры"}.get(n % 10, "игр")
+
+
+# ---------------------------------------------------------------------------
+# Level / XP system
+# ---------------------------------------------------------------------------
+# XP per completed quest: 100 XP
+# XP to advance from level N → N+1: N × 100
+# Cumulative XP for level N: N*(N-1)/2 × 100
+#
+#   Level 1:   0 XP  (0 quests)
+#   Level 2: 100 XP  (1 quest)
+#   Level 3: 300 XP  (3 quests)
+#   Level 4: 600 XP  (6 quests)
+#   Level 5: 1000 XP (10 quests)
+
+XP_PER_QUEST = 100
+
+
+def compute_level(total_xp: int) -> dict:
+    xp = max(0, total_xp)
+    if xp == 0:
+        return {
+            "level": 1, "total_xp": 0,
+            "xp_in_level": 0, "xp_for_next_level": 100, "progress_pct": 0.0,
+        }
+    # Solve N*(N-1)/2*100 <= xp → N = floor((1 + sqrt(1+8*xp/100))/2)
+    level        = max(1, int((1 + math.sqrt(1 + 8 * xp / 100)) / 2))
+    lvl_start    = level * (level - 1) // 2 * 100
+    lvl_step     = level * 100          # XP needed to go from `level` → `level+1`
+    xp_in_level  = xp - lvl_start
+    return {
+        "level":             level,
+        "total_xp":         xp,
+        "xp_in_level":      xp_in_level,
+        "xp_for_next_level": lvl_step,
+        "progress_pct":     round(xp_in_level / lvl_step * 100, 1),
+    }
 
 
 def _game_metric_value(gs, metric: str) -> float:
@@ -146,13 +186,16 @@ def process_gamification(
     """
     Full gamification pipeline:
       1. Update progress on existing active quests
-      2. Generate a new quest if < 2 active
+      2. Generate a new quest if < 2 active; track newly created quest IDs
       3. Check & award achievements
+      4. Compute level / XP
 
     Returns {
-        "quests":           list[dict],   # active + recently completed
-        "achievements":     list[dict],   # all earned achievements
-        "new_achievements": list[dict],   # earned in THIS analysis
+        "quests":           list[dict],
+        "achievements":     list[dict],
+        "new_achievements": list[dict],
+        "new_quest_ids":    list[int],   # IDs created in THIS analysis
+        "level":            dict,        # level / XP info
     }
     """
     role = role.upper()
@@ -163,6 +206,8 @@ def process_gamification(
 
     # ── 2. Generate new quest if slot available ───────────────────────────
     active_quests = _get_active_quests(conn, puuid, role)
+    ids_before    = {q["id"] for q in active_quests}
+
     if len(active_quests) < 2:
         _generate_quest(
             conn=conn,
@@ -170,9 +215,11 @@ def process_gamification(
             role=role,
             benchmark_deltas=result.benchmark_deltas,
             all_match_ids=all_match_ids,
-            games_used=result.games_used,
             existing_metrics={q["metric"] for q in active_quests},
         )
+
+    active_after  = _get_active_quests(conn, puuid, role)
+    new_quest_ids = [q["id"] for q in active_after if q["id"] not in ids_before]
 
     # ── 3. Check & award achievements ────────────────────────────────────
     completed_quests_count = _count_completed_quests(conn, puuid)
@@ -192,11 +239,17 @@ def process_gamification(
             ach = _earn_achievement(conn, puuid, key, defn)
             new_achievements.append(ach)
 
-    # ── 4. Collect final state ────────────────────────────────────────────
+    # ── 4. Level / XP ────────────────────────────────────────────────────
+    total_xp   = completed_quests_count * XP_PER_QUEST
+    level_info = compute_level(total_xp)
+
+    # ── 5. Collect final state ────────────────────────────────────────────
     return {
         "quests":           _get_quests_for_display(conn, puuid, role),
         "achievements":     _get_earned_achievements(conn, puuid),
         "new_achievements": new_achievements,
+        "new_quest_ids":    new_quest_ids,
+        "level":            level_info,
     }
 
 
@@ -297,7 +350,6 @@ def _generate_quest(
     role: str,
     benchmark_deltas: dict,
     all_match_ids: list[str],
-    games_used: int,
     existing_metrics: set[str],
 ) -> None:
     """Generate at most 1 new quest targeting the worst un-tracked metric."""
@@ -318,7 +370,7 @@ def _generate_quest(
         higher     = defn["higher_is_better"]
         target_val = delta.benchmark_p50 * defn["target_pct"]
 
-        n   = 3 if games_used < 10 else 5
+        n   = QUEST_TARGET_GAMES   # always 3 games
         gw  = _games_word(n)
         desc = defn["desc_tmpl"].format(n=n, gw=gw, v=target_val)
 
