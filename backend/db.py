@@ -532,6 +532,10 @@ def get_cached_analysis(
     # Инвалидируем кэш старых версий без обязательных полей
     if "champion_stats" not in data:
         return None
+    if not data.get("champion_stats"):   # пустой список — тоже недействителен
+        return None
+    if "quests" not in data:             # кэш до геймификации — инвалидируем
+        return None
     return data
 
 

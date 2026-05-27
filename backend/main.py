@@ -347,8 +347,15 @@ async def _analyze_single_role(
     cached_result = get_cached_analysis(state.db, puuid, cache_role, newest_match)
     if cached_result is not None:
         cached_result["from_cache"] = True
-        # Don't re-flash achievements when there are no new games
         cached_result["new_achievements"] = []
+        # Always serve fresh gamification state even on cache hit
+        try:
+            from gamification import _get_quests_for_display, _get_earned_achievements
+            cached_result["quests"]       = _get_quests_for_display(state.db, puuid, cache_role)
+            cached_result["achievements"] = _get_earned_achievements(state.db, puuid)
+        except Exception:
+            cached_result.setdefault("quests", [])
+            cached_result.setdefault("achievements", [])
         return cached_result
 
     # 3. Ранг
