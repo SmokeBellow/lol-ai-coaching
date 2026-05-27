@@ -55,6 +55,11 @@ ROLE_LABELS = {
     "BOTTOM": "Бот", "UTILITY": "Сапорт",
 }
 
+# Каскадный сбор матчей
+_TARGET_ROLE_GAMES = 10   # минимум игр на роли для полноценного анализа
+_BATCH_SIZE        = 20   # игр за один запрос
+_MAX_TOTAL         = 100  # максимум всего матчей для поиска
+
 # ---------------------------------------------------------------------------
 # App lifespan
 # ---------------------------------------------------------------------------
@@ -256,83 +261,204 @@ async def _analyze_all_roles(summoner: str, region: str, count: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Cascade match fetcher
+# ---------------------------------------------------------------------------
+
+async def _cascade_fetch(
+    puuid: str, routing_region: str, role: str
+) -> tuple[list[str], list[dict], int, int]:
+    """
+    Fetch matches in batches of _BATCH_SIZE until _TARGET_ROLE_GAMES games
+    on `role` are found, or _MAX_TOTAL total matches are searched.
+
+    Returns (all_match_ids, all_matches, role_count, total_fetched).
+    """
+    all_match_ids: list[str] = []
+    all_matches:   list[dict] = []
+    role_count  = 0
+    start       = 0
+
+    while role_count < _TARGET_ROLE_GAMES and start < _MAX_TOTAL:
+        this_batch = min(_BATCH_SIZE, _MAX_TOTAL - start)
+        batch_ids  = await state.riot.get_match_ids(
+            puuid, routing_region, this_batch, start=start
+        )
+        if not batch_ids:
+            break   # история закончилась
+
+        all_match_ids.extend(batch_ids)
+
+        batch_matches = list(await asyncio.gather(
+            *[state.riot.get_match(mid, routing_region) for mid in batch_ids]
+        ))
+        all_matches.extend(batch_matches)
+
+        for match in batch_matches:
+            for p in match.get("info", {}).get("participants", []):
+                if p.get("puuid") == puuid and p.get("teamPosition", "").upper() == role:
+                    role_count += 1
+                    break
+
+        start += len(batch_ids)
+        if len(batch_ids) < this_batch:
+            break   # Riot вернул меньше — конец истории
+
+    return all_match_ids, all_matches, role_count, start
+
+
+# ---------------------------------------------------------------------------
 # Single-role full analysis
 # ---------------------------------------------------------------------------
 
 async def _analyze_single_role(
     summoner: str, region: str, role: str, tier: Optional[str], count: int
 ) -> dict:
-    # 1. Резолвим puuid + получаем список match_id (быстро, без детальной загрузки)
+    from riot_client import PLATFORM_TO_REGION, PlayerData, SummonerRank
+
+    # 1. Резолвим puuid + display name
     try:
-        platform      = state.riot.resolve_platform(region)
-        routing       = state.riot._http   # используем тот же http-клиент
-        from riot_client import PLATFORM_TO_REGION
+        platform       = state.riot.resolve_platform(region)
         routing_region = PLATFORM_TO_REGION[platform]
 
-        # account-v1 → puuid (если Riot ID)
         if "#" in summoner:
-            gn, tl = summoner.split("#", 1)
-            account = await state.riot.get_account_by_riot_id(gn, tl, routing_region)
-            puuid   = account["puuid"]
+            gn, tl   = summoner.split("#", 1)
+            account  = await state.riot.get_account_by_riot_id(gn, tl, routing_region)
+            puuid    = account["puuid"]
+            summoner_name = f"{account['gameName']}#{account['tagLine']}"
         else:
             summ_obj = await state.riot.get_summoner_by_name(summoner, platform)
             puuid    = summ_obj["puuid"]
-
-        match_ids = await state.riot.get_match_ids(puuid, routing_region, count)
+            summoner_name = summ_obj.get("name", summoner)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Riot API: {exc}")
 
-    newest_match = match_ids[0] if match_ids else ""
+    # 2. Проверяем кэш по первому (новейшему) match_id
+    try:
+        first_ids    = await state.riot.get_match_ids(puuid, routing_region, 1)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Riot API: {exc}")
+
+    newest_match = first_ids[0] if first_ids else ""
     cache_role   = role.upper()
 
-    # 2. Проверка кэша
     cached_result = get_cached_analysis(state.db, puuid, cache_role, newest_match)
     if cached_result is not None:
         cached_result["from_cache"] = True
         return cached_result
 
-    # 3. Полный пайплайн Riot API
+    # 3. Ранг
     try:
-        player = await state.riot.fetch_player_data(summoner, region, count)
+        rank_entries = await state.riot.get_rank(puuid, platform)
+        solo_raw     = next(
+            (r for r in rank_entries if r.get("queueType") == "RANKED_SOLO_5x5"), None
+        )
+        rank = (
+            SummonerRank(
+                tier=solo_raw["tier"], division=solo_raw["rank"],
+                lp=solo_raw["leaguePoints"], queue_type="RANKED_SOLO_5x5",
+            ) if solo_raw else None
+        )
+    except Exception:
+        rank = None
+
+    # 4. Каскадный сбор матчей — ищем _TARGET_ROLE_GAMES игр на роли
+    try:
+        all_match_ids, all_matches, role_count, total_fetched = await _cascade_fetch(
+            puuid, routing_region, role.upper()
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Riot API: {exc}")
 
-    effective_tier = (
-        tier.upper() if tier
-        else (player.rank.tier if player.rank else "GOLD")
+    # 4b. Фоллбэк: нет ни одной игры на роли
+    if role_count == 0:
+        role_label = ROLE_LABELS.get(role.upper(), role)
+        return {
+            "summoner":          summoner_name,
+            "region":            region,
+            "role":              role.upper(),
+            "insufficient_data": True,
+            "games_searched":    total_fetched,
+            "role_games_found":  0,
+            "message": (
+                f"За последние {total_fetched} ранговых игр не найдено ни одной "
+                f"игры на роли «{role_label}». Сыграй хотя бы несколько матчей на этой роли!"
+            ),
+        }
+
+    # 5. Таймлайны (solo deaths до 10 мин) — только для матчей со смертями
+    try:
+        needs_timeline = [
+            match["metadata"]["matchId"]
+            for match in all_matches
+            for p in match["info"]["participants"]
+            if p.get("puuid") == puuid and p.get("deaths", 0) > 0
+        ]
+        # убираем дубли, сохраняем порядок
+        seen: set[str] = set()
+        needs_timeline = [m for m in needs_timeline if not (m in seen or seen.add(m))]
+
+        tl_results = await asyncio.gather(
+            *[state.riot.get_timeline(mid, routing_region) for mid in needs_timeline],
+            return_exceptions=True,
+        )
+        timelines = {
+            mid: res for mid, res in zip(needs_timeline, tl_results)
+            if not isinstance(res, Exception)
+        }
+        for match in all_matches:
+            mid          = match["metadata"]["matchId"]
+            participants = match["info"]["participants"]
+            player_p     = next((p for p in participants if p.get("puuid") == puuid), None)
+            if player_p:
+                player_p["solo_deaths_before_10"] = (
+                    state.riot._extract_solo_deaths_before_10(timelines[mid], puuid, participants)
+                    if mid in timelines else 0
+                )
+    except Exception:
+        pass   # таймлайны некритичны
+
+    # 6. Собираем PlayerData из накопленных матчей
+    player = PlayerData(
+        summoner_name=summoner_name,
+        summoner_id=puuid,
+        puuid=puuid,
+        account_id="",
+        platform=platform,
+        region=routing_region,
+        rank=rank,
+        matches=all_matches,
     )
 
-    # Определяем чемпиона из последнего матча роли
+    effective_tier = tier.upper() if tier else (rank.tier if rank else "GOLD")
+
+    # 7. Определяем чемпиона из последнего матча на роли
     champion = "Jinx"
-    for match in player.matches:
-        info = match.get("info", {})
-        for p in info.get("participants", []):
-            if p.get("puuid") == player.puuid and p.get("teamPosition") == role.upper():
+    for match in reversed(all_matches):
+        for p in match.get("info", {}).get("participants", []):
+            if p.get("puuid") == puuid and p.get("teamPosition") == role.upper():
                 champion = p.get("championName", "Jinx")
                 break
         else:
             continue
         break
 
-    # 4. Бенчмарки
+    # 8. Бенчмарки
     try:
         benchmark = await state.bench.get(champion, role.upper(), effective_tier)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Benchmark: {exc}")
 
-    # 5. Анализ
+    # 9. Анализ
     prev_rank = get_player_rank(state.db, puuid)
     result    = analyze(player, benchmark, previous_rank=prev_rank)
 
-    # 6. Загружаем предыдущий coaching_log
-    prev_log   = get_last_coaching_log(state.db, puuid, role.upper())
-    new_games  = 0
-    if prev_log and match_ids:
-        prev_set  = set(prev_log["match_ids"])
-        curr_set  = set(match_ids)
-        new_games = len(curr_set - prev_set)
+    # 10. Follow-up: сколько новых игр с прошлого коучинга
+    prev_log  = get_last_coaching_log(state.db, puuid, role.upper())
+    new_games = 0
+    if prev_log and all_match_ids:
+        new_games = len(set(all_match_ids) - set(prev_log["match_ids"]))
 
-    # 7. Claude
+    # 11. Claude
     active_mistakes = get_active_mistakes(state.db, puuid, role.upper())
     try:
         coaching = await state.claude.coach_async(
@@ -343,34 +469,34 @@ async def _analyze_single_role(
     except Exception as exc:
         coaching = {
             "primary_focus": "Анализ данных",
-            "summary": f"Claude временно недоступен: {exc}",
+            "summary":       f"Claude временно недоступен: {exc}",
             "flags": [], "follow_up": None,
             "coaching_points": [], "confidence": 0.0,
         }
 
-    # 8. Сохраняем в БД
-    upsert_player(state.db, puuid, player.summoner_name, player.platform, player.rank)
+    # 12. БД
+    upsert_player(state.db, puuid, summoner_name, platform, rank)
     flagged = _detect_flagged_mistakes(result, benchmark)
     process_analysis_mistakes(state.db, puuid, role.upper(), flagged)
 
-    # Сохраняем coaching_log (только если Claude ответил нормально)
     if coaching.get("confidence", 0) > 0:
         save_coaching_log(
             state.db, puuid, role.upper(), result.patch,
-            match_ids=list(match_ids),
+            match_ids=list(all_match_ids),
             advice=coaching,
             stats=result.summary,
             games_count=result.games_used,
         )
 
-    # 9. Формируем ответ
+    # 13. Ответ
     fresh_mistakes = get_active_mistakes(state.db, puuid, role.upper())
     response = _build_analyze_response(
-        result, benchmark, coaching, fresh_mistakes, player.rank, cached=False
+        result, benchmark, coaching, fresh_mistakes, rank, cached=False
     )
     response["new_games_since_prev"] = new_games
+    response["games_searched"]       = total_fetched
+    response["role_games_found"]     = role_count
 
-    # 10. Кэшируем только если Claude ответил корректно (confidence > 0)
     if coaching.get("confidence", 0) > 0:
         save_analysis_cache(state.db, puuid, cache_role, newest_match, response)
 

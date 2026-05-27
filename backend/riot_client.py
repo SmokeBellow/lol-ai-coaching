@@ -224,12 +224,14 @@ class RiotClient:
         puuid: str,
         region: str,
         count: int = 40,
+        start: int = 0,
         queue: Optional[int] = 420,  # 420 = ranked solo/duo
     ) -> list[str]:
         q = f"&queue={queue}" if queue is not None else ""
         url = (
             f"https://{region}.api.riotgames.com"
-            f"/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}{q}"
+            f"/lol/match/v5/matches/by-puuid/{puuid}/ids"
+            f"?start={start}&count={count}{q}"
         )
         return await self._get(url)
 

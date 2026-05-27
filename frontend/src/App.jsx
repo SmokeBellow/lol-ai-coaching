@@ -476,7 +476,8 @@ function SingleRoleResult({ data, onResolve }) {
             {data.region?.toUpperCase()} · {ROLE_RU[data.role] || data.role} · {data.tier}
             {data.rank && <span style={{ color: tierColor, fontWeight: 600 }}> · {data.rank.tier} {data.rank.division} {data.rank.lp} LP</span>}
             {' '}· Патч {data.patch}
-            {' '}· {data.games_used}/{data.games_analyzed} игр
+            {' '}· {data.games_used}/{data.games_analyzed} игр на роли
+            {data.games_searched > data.games_analyzed && <span style={{ color: C.textDim }}> (проверено {data.games_searched})</span>}
             {data.new_games_since_prev > 0 && <span style={{ color: C.success }}> · +{data.new_games_since_prev} новых</span>}
           </span>
         </div>
@@ -498,6 +499,27 @@ function SingleRoleResult({ data, onResolve }) {
       <MistakeTracker mistakes={data.active_mistakes} onResolve={onResolve} />
 
       <BenchmarkPanel benchmark={data.benchmark} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Insufficient data fallback
+// ---------------------------------------------------------------------------
+function InsufficientDataCard({ data }) {
+  return (
+    <div style={{ ...CARD, borderColor: C.warn }}>
+      <div style={{ ...ROW, gap: 10, marginBottom: 12 }}>
+        <span style={{ fontSize: 22 }}>🎮</span>
+        <div>
+          <div style={{ fontWeight: 700, color: '#fff', fontSize: 16 }}>{data.summoner}</div>
+          <div style={{ color: C.textDim, fontSize: 12 }}>{ROLE_RU[data.role] || data.role} · проверено {data.games_searched} игр</div>
+        </div>
+      </div>
+      <p style={{ color: C.warn, fontSize: 14, lineHeight: 1.6 }}>{data.message}</p>
+      <p style={{ color: C.textDim, fontSize: 12, marginTop: 8 }}>
+        Для полноценного анализа нужно минимум 10 игр на роли. Попробуй выбрать другую роль или сыграй больше на этой.
+      </p>
     </div>
   )
 }
@@ -558,8 +580,9 @@ export default function App() {
       {loading && <Spinner />}
       {error   && <ErrorBox message={error} />}
 
-      {data && data.mode === 'all_roles' && <RoleComparePanel data={data} />}
-      {data && data.mode !== 'all_roles' && <SingleRoleResult data={data} onResolve={handleResolve} />}
+      {data && data.mode === 'all_roles'    && <RoleComparePanel data={data} />}
+      {data && data.insufficient_data      && <InsufficientDataCard data={data} />}
+      {data && !data.mode && !data.insufficient_data && <SingleRoleResult data={data} onResolve={handleResolve} />}
     </div>
   )
 }
