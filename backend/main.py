@@ -499,6 +499,7 @@ async def _analyze_single_role(
     response["new_games_since_prev"] = new_games
     response["games_searched"]       = total_fetched
     response["role_games_found"]     = role_count
+    response["low_sample"]           = role_count < _TARGET_ROLE_GAMES
 
     if coaching.get("confidence", 0) > 0:
         save_analysis_cache(state.db, puuid, cache_role, newest_match, response)

@@ -486,6 +486,21 @@ function SingleRoleResult({ data, onResolve }) {
 
       <FlagsBar coaching={data.coaching} rankDirection={data.rank_direction} patchChanged={data.patch_changed} fromCache={data.from_cache} />
 
+      {data.low_sample && (
+        <div style={{ ...CARD, borderColor: C.warn, background: C.warn + '11', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <div>
+            <div style={{ fontWeight: 700, color: C.warn, fontSize: 13, marginBottom: 2 }}>
+              Мало данных — найдено {data.role_games_found} из {10} нужных игр
+              {data.games_searched > data.role_games_found && ` (проверено ${data.games_searched} матчей)`}
+            </div>
+            <div style={{ color: C.textDim, fontSize: 12 }}>
+              Тренды и бенчмарк-сравнение могут быть неточными. Сыграй больше игр на этой роли для полноценного анализа.
+            </div>
+          </div>
+        </div>
+      )}
+
       <FollowUp text={data.coaching?.follow_up} newGames={data.new_games_since_prev} />
 
       <PrimaryFocus text={data.coaching?.primary_focus} />
