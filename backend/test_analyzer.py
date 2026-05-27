@@ -558,6 +558,40 @@ def test_analyze_winrate_in_summary() -> None:
     eq(result.summary["winrate"], 50.0, "analyze: 10W 10L -> 50.0% winrate")
 
 
+def test_analyze_role_filter() -> None:
+    """
+    При запросе роли TOP должны учитываться только игры на TOP,
+    а не все матчи (BOTTOM, JUNGLE, ...).
+    """
+    def _make_match_role(match_id: str, position: str, cs: int) -> dict:
+        """Матч с конкретной позицией и cs."""
+        p = _make_participant(puuid="test-puuid", cs=cs, position=position)
+        ally = _make_participant(puuid="ally", cs=200, position="JUNGLE", team_id=100)
+        return {
+            "metadata": {"matchId": match_id},
+            "info": {
+                "gameDuration": 1800,
+                "gameVersion": "15.10.416.3764",
+                "participants": [p, ally],
+            },
+        }
+
+    # 10 игр на TOP с cs=180 (6.0 cs/min) + 10 игр на BOTTOM с cs=270 (9.0 cs/min)
+    top_matches    = [_make_match_role(f"T{i}", "TOP",    180) for i in range(10)]
+    bottom_matches = [_make_match_role(f"B{i}", "BOTTOM", 270) for i in range(10)]
+
+    # Riot отдаёт новейшие первыми — перемешиваем как реальный ответ
+    all_matches = top_matches + bottom_matches  # newest first
+
+    benchmark_top = _make_benchmark(role="TOP")
+    result = analyze(_make_player(all_matches), benchmark_top)
+
+    # Должны использоваться только TOP-игры: 10 шт, cs_per_min ≈ 6.0
+    eq(result.games_analyzed, 10, "role_filter: games_analyzed = 10 (только TOP)")
+    ok(abs(result.summary["cs_per_min"] - 6.0) < 0.1,
+       f"role_filter: cs_per_min ~6.0 (tolko TOP), got {result.summary['cs_per_min']}")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -608,6 +642,7 @@ def main() -> None:
     test_analyze_outlier_excluded()
     test_analyze_benchmark_delta_quartile()
     test_analyze_winrate_in_summary()
+    test_analyze_role_filter()
 
     print()
     if _failures:

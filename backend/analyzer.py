@@ -347,6 +347,12 @@ def analyze(
     # Riot API возвращает матчи новейшими первыми; переворачиваем → хронологически
     all_games.reverse()
 
+    # --- 1b. Фильтр по роли ---
+    # Анализируем только игры на запрошенной роли, чтобы статистика и
+    # benchmark-сравнение были честными (Топ сравнивается с Топом, и т.д.)
+    target_role = benchmark.role.upper()
+    all_games = [g for g in all_games if g.role.upper() == target_role]
+
     # --- 2. Outlier-фильтр ---
     _flag_outliers(all_games)
     clean = [g for g in all_games if not g.outlier]
