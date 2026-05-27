@@ -187,6 +187,7 @@ def _build_analyze_response(result, benchmark, coaching, active_mistakes, rank, 
         "benchmark":        _benchmark_to_dict(benchmark),
         "coaching":         coaching,
         "active_mistakes":  active_mistakes,
+        "champion_stats":   result.champion_stats,
         "from_cache":       cached,
     }
 

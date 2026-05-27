@@ -106,6 +106,9 @@ class AnalysisResult:
     # Удобные скалярные значения для Claude-промпта и фронтенда
     summary: dict[str, float]
 
+    # Статистика по чемпионам (отсортирована по кол-ву игр, убывание)
+    champion_stats: list[dict] = field(default_factory=list)
+
 
 # ---------------------------------------------------------------------------
 # 1. Извлечение признаков из одного матча
@@ -431,6 +434,37 @@ def analyze(
         "solo_deaths_early_avg":   round(_avg([float(g.solo_deaths_early) for g in clean]), 2),
     }
 
+    # --- 8. Статистика по чемпионам ---
+    # Считаем по «чистым» играм (без выбросов), чтобы аномальные игры
+    # не искажали средние по чемпиону.
+    _champ_buckets: dict[str, list[GameStats]] = {}
+    for g in clean:
+        _champ_buckets.setdefault(g.champion, []).append(g)
+
+    champion_stats: list[dict] = []
+    for champ, games in _champ_buckets.items():
+        n    = len(games)
+        wins = sum(1 for g in games if g.win)
+        avg_kills   = _avg([float(g.kills)   for g in games])
+        avg_deaths  = _avg([float(g.deaths)  for g in games])
+        avg_assists = _avg([float(g.assists) for g in games])
+        kda = round((avg_kills + avg_assists) / max(avg_deaths, 1), 2)
+        champion_stats.append({
+            "champion":      champ,
+            "games":         n,
+            "wins":          wins,
+            "winrate":       round(wins / n * 100, 1),
+            "cs_per_min":    round(_avg([g.cs_per_min    for g in games]), 2),
+            "vision_per_min":round(_avg([g.vision_per_min for g in games]), 2),
+            "kills":         round(avg_kills,   2),
+            "deaths":        round(avg_deaths,  2),
+            "assists":       round(avg_assists, 2),
+            "kda":           kda,
+        })
+
+    # Сортировка: сначала по кол-ву игр (больше = важнее), затем по winrate
+    champion_stats.sort(key=lambda x: (x["games"], x["winrate"]), reverse=True)
+
     return AnalysisResult(
         summoner=player.summoner_name,
         region=player.region,
@@ -447,4 +481,5 @@ def analyze(
         rank_direction=rank_direction,
         patch_changed=patch_changed,
         summary=summary,
+        champion_stats=champion_stats,
     )

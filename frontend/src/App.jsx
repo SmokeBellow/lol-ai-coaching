@@ -339,7 +339,73 @@ function MistakeTracker({ mistakes, onResolve }) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Benchmark Panel
+// 8. Champion Stats Panel
+// ---------------------------------------------------------------------------
+function WinrateBar({ winrate }) {
+  const color = winrate >= 55 ? C.success : winrate >= 50 ? '#84cc16' : winrate >= 45 ? C.warn : C.danger
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ background: C.border, borderRadius: 3, height: 5, width: 56, flexShrink: 0 }}>
+        <div style={{ width: `${Math.min(winrate, 100)}%`, height: '100%', background: color, borderRadius: 3 }} />
+      </div>
+      <span style={{ color, fontWeight: 700, fontSize: 13, minWidth: 42 }}>{winrate}%</span>
+    </div>
+  )
+}
+
+function ChampionStatsPanel({ champion_stats }) {
+  if (!champion_stats?.length) return null
+  const top = champion_stats.slice(0, 6)   // показываем не более 6 чемпионов
+
+  return (
+    <div style={CARD}>
+      <SectionTitle>Чемпионы на роли</SectionTitle>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ color: C.textDim, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              {['Чемпион', 'Игр', 'Винрейт', 'KDA', 'CS/мин', 'Vision/мин'].map(h => (
+                <th key={h} style={{ textAlign: h === 'Чемпион' ? 'left' : 'center', padding: '4px 10px', borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((c, i) => {
+              const kdaColor = c.kda >= 3 ? C.success : c.kda >= 2 ? '#84cc16' : c.kda >= 1 ? C.warn : C.danger
+              return (
+                <tr key={c.champion} style={{ borderBottom: `1px solid ${C.border}33`, background: i === 0 ? C.accent + '0a' : 'transparent' }}>
+                  <td style={{ padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {i === 0 && <span style={{ fontSize: 10, color: C.accent, fontWeight: 700 }}>★</span>}
+                      <span style={{ fontWeight: 700, color: '#fff' }}>{c.champion}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center', color: C.textDim }}>
+                    {c.games}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                    <WinrateBar winrate={c.winrate} />
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: kdaColor }}>
+                    {fmtNum(c.kda)}
+                    <span style={{ display: 'block', fontSize: 10, color: C.textDim, fontWeight: 400 }}>
+                      {fmtNum(c.kills, 1)}/{fmtNum(c.deaths, 1)}/{fmtNum(c.assists, 1)}
+                    </span>
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center', color: C.text }}>{fmtNum(c.cs_per_min)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center', color: C.text }}>{fmtNum(c.vision_per_min)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 9. Benchmark Panel
 // ---------------------------------------------------------------------------
 function BenchmarkPanel({ benchmark }) {
   if (!benchmark) return null
@@ -376,7 +442,7 @@ function BenchmarkPanel({ benchmark }) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Confidence Bar
+// 10. Confidence Bar
 // ---------------------------------------------------------------------------
 function ConfidenceBar({ confidence }) {
   if (confidence == null) return null
@@ -424,6 +490,8 @@ function SingleRoleResult({ data, onResolve }) {
       <PrimaryFocus text={data.coaching?.primary_focus} />
 
       <SummaryCard summary={data.summary} benchmark_deltas={data.benchmark_deltas} trends={data.trends} />
+
+      <ChampionStatsPanel champion_stats={data.champion_stats} />
 
       <CoachingSection summary={data.coaching?.summary} coaching_points={data.coaching?.coaching_points} />
 
