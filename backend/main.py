@@ -512,7 +512,9 @@ async def _analyze_single_role(
             all_match_ids=list(all_match_ids),
             current_rank=rank,
         )
-    except Exception:
+    except Exception as _gami_exc:
+        import logging as _log
+        _log.exception("Gamification failed for %s/%s: %s", puuid[:12], role, _gami_exc)
         gamification = {"quests": [], "achievements": [], "new_achievements": []}
 
     # 13. Ответ

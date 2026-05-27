@@ -534,7 +534,9 @@ def get_cached_analysis(
         return None
     if not data.get("champion_stats"):   # пустой список — тоже недействителен
         return None
-    if "quests" not in data:             # кэш до геймификации — инвалидируем
+    # Инвалидируем кэш без квестов (до геймификации) — пустой список тоже не считается,
+    # потому что на cache-hit мы пересчитываем квесты из БД
+    if "quests" not in data:
         return None
     return data
 
