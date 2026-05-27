@@ -42,6 +42,7 @@ from db import (
     get_player_by_summoner,
     get_player_rank,
     init_db,
+    log_request,
     process_analysis_mistakes,
     save_analysis_cache,
     save_coaching_log,
@@ -536,9 +537,81 @@ async def analyze_endpoint(
     role=ALL    → статистика по всем ролям без Claude.
     role=BOTTOM → полный анализ одной роли + Claude + кэш + follow-up.
     """
+    import time as _time
+
     if role.upper() == "ALL":
         return await _analyze_all_roles(summoner, region, count)
-    return await _analyze_single_role(summoner, region, role, tier, count)
+
+    t0 = _time.monotonic()
+    error_msg: Optional[str] = None
+    result: Optional[dict]   = None
+    try:
+        result = await _analyze_single_role(summoner, region, role, tier, count)
+        return result
+    except Exception as exc:
+        error_msg = str(exc)
+        raise
+    finally:
+        elapsed_ms = int((_time.monotonic() - t0) * 1000)
+        try:
+            log_request(
+                state.db,
+                summoner=summoner,
+                region=region,
+                role=role if role.upper() != "ALL" else "ALL",
+                response_ms      = elapsed_ms,
+                games_searched   = result.get("games_searched")   if result else None,
+                role_games_found = result.get("role_games_found") if result else None,
+                from_cache       = bool(result.get("from_cache")) if result else False,
+                error            = error_msg,
+            )
+        except Exception:
+            pass  # логирование некритично
+
+
+@app.get("/stats/sla")
+async def sla_stats_endpoint(limit: int = Query(200, ge=10, le=1000)):
+    """SLA статистика запросов из request_log."""
+    rows = state.db.execute(
+        """
+        SELECT role, from_cache, error,
+               response_ms, games_searched, role_games_found,
+               datetime(created_at, 'unixepoch') as ts
+        FROM request_log
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+    records = [dict(r) for r in rows]
+
+    # Агрегаты по успешным некэшированным запросам
+    ok = [r for r in records if r["error"] is None and not r["from_cache"] and r["response_ms"]]
+    cached = [r for r in records if r["from_cache"]]
+    errors = [r for r in records if r["error"]]
+
+    def pct(lst, p):
+        if not lst: return None
+        s = sorted(lst)
+        return s[int(len(s) * p)]
+
+    ms_vals = [r["response_ms"] for r in ok]
+
+    return {
+        "total_requests":  len(records),
+        "ok":              len(ok),
+        "from_cache":      len(cached),
+        "errors":          len(errors),
+        "response_ms": {
+            "p50":  pct(ms_vals, 0.50),
+            "p75":  pct(ms_vals, 0.75),
+            "p90":  pct(ms_vals, 0.90),
+            "p95":  pct(ms_vals, 0.95),
+            "max":  max(ms_vals) if ms_vals else None,
+        },
+        "recent": records[:20],
+    }
 
 
 @app.get("/mistakes")

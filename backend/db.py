@@ -99,6 +99,22 @@ CREATE TABLE IF NOT EXISTS analysis_cache (
     cached_at     REAL NOT NULL,
     PRIMARY KEY (puuid, role)
 );
+
+CREATE TABLE IF NOT EXISTS request_log (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at       REAL    NOT NULL,
+    summoner         TEXT    NOT NULL,
+    region           TEXT    NOT NULL,
+    role             TEXT    NOT NULL,
+    response_ms      INTEGER,        -- NULL если ошибка до завершения
+    games_searched   INTEGER,        -- сколько матчей просмотрено (каскад)
+    role_games_found INTEGER,        -- сколько игр на роли найдено
+    from_cache       INTEGER NOT NULL DEFAULT 0,
+    error            TEXT            -- текст ошибки или NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_request_log_created
+    ON request_log (created_at);
 """
 
 
@@ -442,7 +458,39 @@ def get_cached_analysis(
     ).fetchone()
     if row is None or row["newest_match"] != newest_match:
         return None
-    return json.loads(row["result_json"])
+    data = json.loads(row["result_json"])
+    # Инвалидируем кэш старых версий без обязательных полей
+    if "champion_stats" not in data:
+        return None
+    return data
+
+
+def log_request(
+    conn: sqlite3.Connection,
+    summoner: str,
+    region: str,
+    role: str,
+    response_ms: Optional[int] = None,
+    games_searched: Optional[int] = None,
+    role_games_found: Optional[int] = None,
+    from_cache: bool = False,
+    error: Optional[str] = None,
+) -> None:
+    """Записывает строку в request_log для мониторинга SLA."""
+    conn.execute(
+        """
+        INSERT INTO request_log
+            (created_at, summoner, region, role,
+             response_ms, games_searched, role_games_found, from_cache, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            time.time(), summoner, region.upper(), role.upper(),
+            response_ms, games_searched, role_games_found,
+            int(from_cache), error,
+        ),
+    )
+    conn.commit()
 
 
 def save_analysis_cache(
