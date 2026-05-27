@@ -18,6 +18,7 @@ FastAPI backend для LoL AI Coaching Service.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import statistics
