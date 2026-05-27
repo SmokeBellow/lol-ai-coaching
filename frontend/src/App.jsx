@@ -405,7 +405,128 @@ function ChampionStatsPanel({ champion_stats }) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Benchmark Panel
+// 9. Quest Panel
+// ---------------------------------------------------------------------------
+function QuestProgressBar({ done, total, completed }) {
+  const pct   = total > 0 ? Math.min(done / total * 100, 100) : 0
+  const color = completed ? C.success : C.accent
+  return (
+    <div style={{ background: C.border, borderRadius: 4, height: 6 }}>
+      <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.5s ease' }} />
+    </div>
+  )
+}
+
+function QuestCard({ quest }) {
+  const done      = quest.games_done ?? 0
+  const total     = quest.target_games ?? 1
+  const completed = quest.status === 'completed'
+  const color     = completed ? C.success : C.accent
+
+  return (
+    <div style={{ padding: '12px 0', borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ ...ROW, justifyContent: 'space-between', marginBottom: 4 }}>
+        <div style={{ ...ROW, gap: 8 }}>
+          <span style={{ fontSize: 16 }}>{quest.icon || '🎯'}</span>
+          <span style={{ fontWeight: 700, color: completed ? C.success : '#fff', fontSize: 14 }}>
+            {quest.title}
+          </span>
+          {completed && <Pill label="ВЫПОЛНЕНО ✓" color={C.success} />}
+        </div>
+        <span style={{ color, fontWeight: 800, fontSize: 14, letterSpacing: '0.03em' }}>
+          {done}/{total}
+        </span>
+      </div>
+      <div style={{ color: C.textDim, fontSize: 12, marginBottom: 8, lineHeight: 1.4 }}>
+        {quest.description}
+      </div>
+      <QuestProgressBar done={done} total={total} completed={completed} />
+    </div>
+  )
+}
+
+function QuestPanel({ quests }) {
+  if (!quests?.length) return null
+  const active    = quests.filter(q => q.status === 'active')
+  const completed = quests.filter(q => q.status === 'completed')
+  return (
+    <div style={CARD}>
+      <SectionTitle>🎯 Задания</SectionTitle>
+      {active.map(q => <QuestCard key={q.id} quest={q} />)}
+      {completed.map(q => <QuestCard key={q.id} quest={q} />)}
+      {active.length === 0 && completed.length === 0 && (
+        <div style={{ color: C.textDim, fontSize: 13 }}>Заданий пока нет — запусти анализ снова!</div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 10. Achievements Panel
+// ---------------------------------------------------------------------------
+function AchievementBadge({ ach, isNew }) {
+  return (
+    <div style={{
+      background: isNew ? C.gold + '22' : C.border + '55',
+      border:     `1px solid ${isNew ? C.gold : C.border}`,
+      borderRadius: 10,
+      padding: '10px 14px',
+      display: 'flex', gap: 10, alignItems: 'center',
+      minWidth: 150,
+      flex: '1 1 150px',
+      position: 'relative',
+    }}>
+      {isNew && (
+        <div style={{ position: 'absolute', top: -6, right: -6, background: C.gold, borderRadius: '50%', width: 14, height: 14, fontSize: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 900 }}>
+          ★
+        </div>
+      )}
+      <span style={{ fontSize: 22 }}>{ach.icon}</span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 12, color: isNew ? C.gold : C.text }}>{ach.title}</div>
+        <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.3 }}>{ach.description}</div>
+      </div>
+    </div>
+  )
+}
+
+function AchievementsPanel({ achievements, newAchievements }) {
+  if (!achievements?.length) return null
+  const newKeys = new Set((newAchievements || []).map(a => a.key))
+  return (
+    <div style={CARD}>
+      <SectionTitle>🏆 Достижения ({achievements.length})</SectionTitle>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {achievements.map(a => (
+          <AchievementBadge key={a.key} ach={a} isNew={newKeys.has(a.key)} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NewAchievementBanner({ achievements }) {
+  if (!achievements?.length) return null
+  return (
+    <div style={{ ...CARD, borderColor: C.gold, background: C.gold + '11' }}>
+      <SectionTitle>🎉 Новые достижения!</SectionTitle>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        {achievements.map(a => (
+          <div key={a.key} style={{ ...ROW, gap: 10, background: C.gold + '1a', borderRadius: 10, padding: '10px 14px', flex: '1 1 180px' }}>
+            <span style={{ fontSize: 26 }}>{a.icon}</span>
+            <div>
+              <div style={{ fontWeight: 800, color: C.gold, fontSize: 14 }}>{a.title}</div>
+              <div style={{ fontSize: 12, color: C.textDim }}>{a.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 12. Benchmark Panel
 // ---------------------------------------------------------------------------
 function BenchmarkPanel({ benchmark }) {
   if (!benchmark) return null
@@ -442,7 +563,7 @@ function BenchmarkPanel({ benchmark }) {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Confidence Bar
+// 13. Confidence Bar
 // ---------------------------------------------------------------------------
 function ConfidenceBar({ confidence }) {
   if (confidence == null) return null
@@ -501,17 +622,25 @@ function SingleRoleResult({ data, onResolve }) {
         </div>
       )}
 
+      {data.new_achievements?.length > 0 && (
+        <NewAchievementBanner achievements={data.new_achievements} />
+      )}
+
       <FollowUp text={data.coaching?.follow_up} newGames={data.new_games_since_prev} />
 
       <PrimaryFocus text={data.coaching?.primary_focus} />
 
       <SummaryCard summary={data.summary} benchmark_deltas={data.benchmark_deltas} trends={data.trends} />
 
+      <QuestPanel quests={data.quests} />
+
       <ChampionStatsPanel champion_stats={data.champion_stats} />
 
       <CoachingSection summary={data.coaching?.summary} coaching_points={data.coaching?.coaching_points} />
 
       <MistakeTracker mistakes={data.active_mistakes} onResolve={onResolve} />
+
+      <AchievementsPanel achievements={data.achievements} newAchievements={data.new_achievements} />
 
       <BenchmarkPanel benchmark={data.benchmark} />
     </div>

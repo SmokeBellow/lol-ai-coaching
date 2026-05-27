@@ -48,6 +48,7 @@ from db import (
     save_coaching_log,
     upsert_player,
 )
+from gamification import process_gamification
 from riot_client import RiotClient
 
 DB_PATH = os.getenv("DB_PATH", "lol_coaching.db")
@@ -346,6 +347,8 @@ async def _analyze_single_role(
     cached_result = get_cached_analysis(state.db, puuid, cache_role, newest_match)
     if cached_result is not None:
         cached_result["from_cache"] = True
+        # Don't re-flash achievements when there are no new games
+        cached_result["new_achievements"] = []
         return cached_result
 
     # 3. Ранг
@@ -491,6 +494,20 @@ async def _analyze_single_role(
             games_count=result.games_used,
         )
 
+    # 12b. Геймификация — квесты и ачивки
+    try:
+        gamification = process_gamification(
+            conn=state.db,
+            puuid=puuid,
+            role=role.upper(),
+            result=result,
+            benchmark=benchmark,
+            all_match_ids=list(all_match_ids),
+            current_rank=rank,
+        )
+    except Exception:
+        gamification = {"quests": [], "achievements": [], "new_achievements": []}
+
     # 13. Ответ
     fresh_mistakes = get_active_mistakes(state.db, puuid, role.upper())
     response = _build_analyze_response(
@@ -500,6 +517,9 @@ async def _analyze_single_role(
     response["games_searched"]       = total_fetched
     response["role_games_found"]     = role_count
     response["low_sample"]           = role_count < _TARGET_ROLE_GAMES
+    response["quests"]               = gamification["quests"]
+    response["achievements"]         = gamification["achievements"]
+    response["new_achievements"]     = gamification["new_achievements"]
 
     if coaching.get("confidence", 0) > 0:
         save_analysis_cache(state.db, puuid, cache_role, newest_match, response)

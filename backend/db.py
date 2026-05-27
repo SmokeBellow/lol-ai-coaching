@@ -47,14 +47,17 @@ ESCALATE_THRESHOLD = 8    # сессий с ошибкой → severity = "escal
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (
-    puuid          TEXT PRIMARY KEY,
-    summoner       TEXT NOT NULL,
-    platform       TEXT NOT NULL,
-    rank_tier      TEXT,
-    rank_division  TEXT,
-    rank_lp        INTEGER,
-    last_analyzed  REAL,
-    created_at     REAL NOT NULL DEFAULT (strftime('%s', 'now'))
+    puuid                TEXT PRIMARY KEY,
+    summoner             TEXT NOT NULL,
+    platform             TEXT NOT NULL,
+    rank_tier            TEXT,
+    rank_division        TEXT,
+    rank_lp              INTEGER,
+    last_analyzed        REAL,
+    created_at           REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    initial_rank_tier    TEXT,
+    initial_rank_division TEXT,
+    initial_rank_lp      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS mistakes (
@@ -115,7 +118,61 @@ CREATE TABLE IF NOT EXISTS request_log (
 
 CREATE INDEX IF NOT EXISTS idx_request_log_created
     ON request_log (created_at);
+
+CREATE TABLE IF NOT EXISTS quests (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    puuid               TEXT    NOT NULL,
+    role                TEXT    NOT NULL,
+    metric              TEXT    NOT NULL,
+    title               TEXT    NOT NULL,
+    description         TEXT    NOT NULL,
+    icon                TEXT    NOT NULL DEFAULT '🎯',
+    target_value        REAL    NOT NULL,
+    target_games        INTEGER NOT NULL,
+    games_done          INTEGER NOT NULL DEFAULT 0,
+    higher_is_better    INTEGER NOT NULL DEFAULT 1,
+    baseline_match_ids  TEXT    NOT NULL DEFAULT '[]',
+    status              TEXT    NOT NULL DEFAULT 'active',
+    created_at          REAL    NOT NULL,
+    completed_at        REAL,
+    FOREIGN KEY (puuid) REFERENCES players(puuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_quests_puuid_role
+    ON quests (puuid, role, status);
+
+CREATE TABLE IF NOT EXISTS achievements (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    puuid       TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    icon        TEXT NOT NULL DEFAULT '🏆',
+    earned_at   REAL NOT NULL,
+    metadata    TEXT,
+    UNIQUE (puuid, key),
+    FOREIGN KEY (puuid) REFERENCES players(puuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_achievements_puuid
+    ON achievements (puuid, earned_at);
 """
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """
+    Idempotent schema migrations for columns added after initial release.
+    Called once per init_db() — safe to run on every startup.
+    """
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(players)").fetchall()}
+    for col, defn in [
+        ("initial_rank_tier",     "TEXT"),
+        ("initial_rank_division", "TEXT"),
+        ("initial_rank_lp",       "INTEGER"),
+    ]:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE players ADD COLUMN {col} {defn}")
+    conn.commit()
 
 
 def init_db(path: str = "lol_coaching.db") -> sqlite3.Connection:
@@ -123,6 +180,7 @@ def init_db(path: str = "lol_coaching.db") -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row    # dict-like доступ к строкам
     conn.executescript(_SCHEMA)
+    _migrate_schema(conn)
     conn.commit()
     return conn
 
@@ -138,13 +196,20 @@ def upsert_player(
     platform: str,
     rank: Optional[SummonerRank] = None,
 ) -> None:
-    """Вставляет или обновляет профиль игрока."""
+    """
+    Вставляет или обновляет профиль игрока.
+
+    initial_rank_* задаётся ТОЛЬКО при первой вставке (не перезаписывается)
+    — используется для отслеживания ранговой прогрессии.
+    """
     now = time.time()
     conn.execute(
         """
-        INSERT INTO players (puuid, summoner, platform, rank_tier, rank_division, rank_lp,
-                             last_analyzed, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO players
+            (puuid, summoner, platform, rank_tier, rank_division, rank_lp,
+             last_analyzed, created_at,
+             initial_rank_tier, initial_rank_division, initial_rank_lp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?)
         ON CONFLICT(puuid) DO UPDATE SET
             summoner       = excluded.summoner,
             platform       = excluded.platform,
@@ -152,6 +217,7 @@ def upsert_player(
             rank_division  = excluded.rank_division,
             rank_lp        = excluded.rank_lp,
             last_analyzed  = excluded.last_analyzed
+            -- initial_rank_* intentionally omitted: never updated after first insert
         """,
         (
             puuid, summoner, platform,
@@ -159,6 +225,10 @@ def upsert_player(
             rank.division if rank else None,
             rank.lp       if rank else None,
             now, now,
+            # initial rank — only meaningful on first INSERT
+            rank.tier     if rank else None,
+            rank.division if rank else None,
+            rank.lp       if rank else None,
         ),
     )
     conn.commit()
