@@ -386,17 +386,18 @@ async def _analyze_single_role(
             ),
         }
 
-    # 5. Таймлайны (solo deaths до 10 мин) — только для матчей со смертями
+    # 5. Таймлайны (solo deaths до 10 мин)
+    # Запрашиваем только для матчей НА ЦЕЛЕВОЙ РОЛИ со смертями — не для всех 100.
+    # Это снижает число API-вызовов с ~100 до ~10 и ускоряет ответ в разы.
     try:
-        needs_timeline = [
-            match["metadata"]["matchId"]
-            for match in all_matches
-            for p in match["info"]["participants"]
-            if p.get("puuid") == puuid and p.get("deaths", 0) > 0
-        ]
-        # убираем дубли, сохраняем порядок
-        seen: set[str] = set()
-        needs_timeline = [m for m in needs_timeline if not (m in seen or seen.add(m))]
+        needs_timeline: list[str] = []
+        for match in all_matches:
+            for p in match["info"]["participants"]:
+                if (p.get("puuid") == puuid
+                        and p.get("teamPosition", "").upper() == role.upper()
+                        and p.get("deaths", 0) > 0):
+                    needs_timeline.append(match["metadata"]["matchId"])
+                    break
 
         tl_results = await asyncio.gather(
             *[state.riot.get_timeline(mid, routing_region) for mid in needs_timeline],
